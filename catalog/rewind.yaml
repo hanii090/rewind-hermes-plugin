@@ -3,7 +3,7 @@
 name: rewind
 title: Rewind
 repo: https://github.com/hanii090/rewind-hermes-plugin
-sha: a832d042f6c3b86f5df74634a34a885448ed047b
+sha: 26792c8efdc589684b8aeff177915e2db8f33340
 description: >-
   Per-step undo timeline for agent workspace changes (files + git HEAD) — not memory.
   Every write_file, patch, and terminal/execute_code call becomes a numbered step; /timeline
