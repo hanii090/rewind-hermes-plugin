@@ -42,6 +42,7 @@ def gc(settings, now=None, everything=False) -> dict:
         if everything or s["created"] < cutoff:
             doomed.add(s["id"])
     for ss in per_session.values():
+        ss.sort(key=lambda s: (s.get("seq") or 0, s.get("id") or 0))
         if len(ss) > cap:
             doomed.update(s["id"] for s in ss[: len(ss) - cap])
     doomed_steps = [s for s in steps if s["id"] in doomed]

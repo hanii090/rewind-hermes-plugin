@@ -13,7 +13,23 @@ def _fmt_rewind(r, arg):
         if r.get("irreversible_summary"):
             msg += "\n" + r["irreversible_summary"]
         return msg
-    out = [f"⏪ Rewound to just before step {arg}."]
+    summ = (r.get("target_summary") or "")[:60]
+    undone = r.get("tool_steps_undone")
+    head = f"⏪ Restored to before step {arg}"
+    if summ:
+        head += f" «{summ}»"
+    if undone is not None:
+        head += f" (undid {undone} tool step(s))"
+    head += "."
+    out = [head]
+    # Lead with irreversible honesty when the span crossed a push/publish/remote.
+    if r.get("stays_outside"):
+        out.append(
+            f"  ⚠ Crossed {len(r['stays_outside'])} irreversible step(s) — "
+            "remotes/APIs/DBs were NOT undone:"
+        )
+        for line in (r.get("irreversible_summary") or "").splitlines()[1:]:
+            out.append(line if line.startswith("  ") else ("  " + line))
     mode = r.get("restore_mode") or "move_head"
     for root in r.get("roots") or []:
         bits = [f"{len(root.get('changed') or [])} restored", f"{len(root.get('removed') or [])} removed"]
@@ -28,14 +44,29 @@ def _fmt_rewind(r, arg):
         for h in r["hand_edits_overwritten"]:
             files = ", ".join(h["files"][:8]) + ("…" if len(h["files"]) > 8 else "")
             out.append(f"  ⚠ Overwrote hand-edits in {h['root']}: {files or '(files changed since last step)'}")
-    if r.get("irreversible_summary"):
-        for line in r["irreversible_summary"].splitlines():
-            out.append(line if line.startswith("  ") else ("  " + line))
-    elif r.get("not_reversible"):
-        out.append("  Not undone (outside the workspace): " + "; ".join(r["not_reversible"]))
     if r.get("conversation_hint"):
         out.append("  " + r["conversation_hint"])
     out.append("  A safety snapshot was saved — /timeline shows it; /rewind to it to undo this.")
+    return "\n".join(out)
+
+
+def _fmt_preview(p):
+    if not p.get("ok"):
+        return f"Preview failed: {p.get('error')}"
+    out = [f"🔎 Preview restore before step {p['step']} {p.get('mark') or ''} — no changes made."]
+    out.append(f"  {p.get('confirm')}")
+    if p.get("roots"):
+        out.append("  Roots: " + ", ".join(f"{x['root']} ({x['mode']})" for x in p["roots"]))
+    elif not p.get("restorable"):
+        out.append("  Not restorable locally (remote/empty snapshot) — see stays_outside.")
+    if p.get("stays_outside"):
+        out.append(f"  ⚠ {len(p['stays_outside'])} irreversible side-effect(s) would remain outside:")
+        for x in p["stays_outside"][:5]:
+            out.append(f"    • step {x['seq']}: {x['reason']}")
+    out.append(
+        f"  Run: /rewind {p.get('slash') or p['step']}   · "
+        f"safe alt: /rewind fork {p.get('slash') or p['step']}"
+    )
     return "\n".join(out)
 
 
@@ -45,6 +76,8 @@ def _fmt_fork(f, step):
     out = [f"🌿 Forked the state before step {step} (your current work is untouched):"]
     for x in f["forks"]:
         out.append(f"  {x['path']}" + (f"  on branch {x['branch']}" if x.get("branch") else ""))
+        if x.get("vs_current"):
+            out.append(f"  compare: {x['vs_current']}")
         if x.get("re_run_hint"):
             out.append(f"  hint: {x['re_run_hint'].splitlines()[0]}")
             for extra in x["re_run_hint"].splitlines()[1:]:
@@ -66,6 +99,12 @@ def make(settings):
             r = gc_mod.gc(settings, everything=len(parts) > 1 and parts[1] == "--all")
             return (f"🧹 Rewind gc: dropped {r['steps']} step(s), {r['git_refs']} git ref(s), "
                     f"{r['manifests']} manifest(s), {r['blobs']} blob(s) ({r['bytes_freed'] / 1e6:.1f} MB).")
+        if parts[0] == "preview":
+            target = parts[1] if len(parts) > 1 else "last"
+            seq, err = core.resolve_step_arg(_sid(session_id), target)
+            if err:
+                return f"Preview failed: {err}"
+            return _fmt_preview(core.restore_preview(_sid(session_id), seq))
         if parts[0] == "unfork":
             target = parts[1] if len(parts) > 1 else None
             u = core.unfork(_sid(session_id), target)
@@ -78,22 +117,29 @@ def make(settings):
                 out.append(f"  ⚠ {e}")
             return "\n".join(out)
         if parts[0] == "fork":
-            if len(parts) < 2 or not parts[1].isdigit():
-                return "Usage: /rewind fork <step> [--model <name>]"
+            if len(parts) < 2:
+                return "Usage: /rewind fork <step|last> [--model <name>]"
             model = None
             if "--model" in parts:
                 i = parts.index("--model")
                 model = parts[i + 1] if i + 1 < len(parts) else None
                 if not model:
-                    return "Usage: /rewind fork <step> [--model <name>]"
+                    return "Usage: /rewind fork <step|last> [--model <name>]"
             elif len(parts) >= 3 and not parts[2].startswith("-"):
                 # allow: /rewind fork 2 gpt-5  (optional shorthand)
                 model = parts[2]
-            return _fmt_fork(core.fork(_sid(session_id), int(parts[1]), settings, model=model), parts[1])
-        if not arg.isdigit():
-            return ("Usage: /rewind <step> | /rewind fork <step> [--model NAME] | "
-                    "/rewind unfork [path|step] | /rewind gc [--all]   (see /timeline)")
-        return _fmt_rewind(core.rewind(_sid(session_id), int(arg), settings), arg)
+            seq, err = core.resolve_step_arg(_sid(session_id), parts[1])
+            if err:
+                return f"Fork failed: {err}"
+            return _fmt_fork(core.fork(_sid(session_id), seq, settings, model=model), seq)
+        if arg.lower() in ("last", "-", "latest") or arg.isdigit():
+            seq, err = core.resolve_step_arg(_sid(session_id), arg)
+            if err:
+                return f"Rewind failed: {err}"
+            return _fmt_rewind(core.rewind(_sid(session_id), seq, settings), seq)
+        return ("Usage: /rewind last | /rewind <step> | /rewind preview [last|<step>] | "
+                "/rewind fork <step|last> [--model NAME] | "
+                "/rewind unfork [path|step] | /rewind gc [--all]   (see /timeline)")
 
     def diff_cmd(raw_args: str = "", *, session_id: str = "", **_):
         parts = (raw_args or "").split()

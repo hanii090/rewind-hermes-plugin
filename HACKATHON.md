@@ -4,12 +4,29 @@
 timeline step. `/rewind 3` restores files *and* git HEAD to just before step 3. Fork any step
 into a sibling worktree to try the other approach. Irreversible side-effects are flagged, not lied about.
 
+## The problem (why this can place top-2)
+**Primary pain:** the agent broke my files/repo *N* steps ago. `git checkout` / manual undo is
+hard under agent churn; built-in `/rollback` is coarse (≤1 FS checkpoint/turn + chat); and
+anything that already hit a remote (`git push`, publish, DB) **cannot** be undone by a local
+plugin. Judges reward usefulness beyond a prompt/skill — middleware that journals *before*
+mutations, then makes undo one command, is the gap.
+
+**90s-demo enhancements that most reduce that pain**
+1. **`/rewind last`** — one-shot undo of the latest tool mutation (no timeline arithmetic).
+2. **Irreversible footer on the tool result** — the moment a push/publish runs, the model and
+   operator see that local rewind will not undo the remote (honesty beats silent false hope).
+3. **Fork + compare** — materialise an alternate past beside the live tree and show a one-line
+   `vs_current` so "try the other approach" is visible without a second repo tour.
+
+(Shipped 1–3; v0.3.4 adds `/rewind preview` + timeline “last mutation” / confirm copy so restores across irreversible steps are obvious before you tap undo.)
+
+
 ## Surfaces used (Hermes plugin APIs)
 | Surface | What |
 |---|---|
 | `tool_execution` middleware | Snapshot before/after mutating tools — no model cooperation required |
 | Tool `rewind_restore` | Agent self-repair: list / restore / fork / unfork (approval-friendly schema) |
-| Slash `/timeline`, `/rewind`, `/rewind-diff` | Operator UX (`/rewind fork`, `/rewind unfork`, `/rewind gc`) |
+| Slash `/timeline`, `/rewind`, `/rewind-diff` | Operator UX (`last` / `preview` / fork/unfork/gc) |
 | CLI `hermes rewind` | `timeline` + `gc` outside chat |
 | Dashboard `/api/plugins/rewind/*` | Desktop scrubber backend |
 | Desktop `desktop/plugin.js` | Opt-in right-dock scrubber (Empty/Error/busy states) |
@@ -35,10 +52,10 @@ chain and journals every mutating call whether or not the model "remembers to be
 ```bash
 python3 scripts/demo.py          # scoreboard at end; exit 0 = green
 ```
-Beats: rewrite → delete+commit → irreversible push flagged → timeline → fork --model →
-hand-edit warning + irreversible_summary + HEAD-moved on rewind → unfork → empty-session copy.
+Beats: rewrite → delete+commit → irreversible push flagged (+ result footer) → timeline →
+fork last + vs_current → `/rewind last` (+ hand-edit / irreversible_summary / HEAD) → unfork.
 
-Live Hermes (optional): `scripts/live_probe.py` → `tests/manual_hermes_live_probe.py`.
+Live Hermes (optional): `scripts/live_probe.sh` → `tests/manual_hermes_live_probe.py`.
 
 ## Risks (honest)
 - Restore overwrites hand-edits (we **warn**; `/rollback` preserves by default).

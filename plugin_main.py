@@ -13,29 +13,34 @@ REWIND_RESTORE = {
     "name": "rewind_restore",
     "description": (
         "Undo or branch off THIS session's earlier file/terminal changes. "
-        "ALWAYS call action='list' first — each step shows mark ⚠ when irreversible (push/publish/DB/infra), "
-        "⊘ when remote (not snapshotted), ✗ when the tool failed. "
+        "ALWAYS call action='list' (or action='preview') first — list includes suggested.confirm; "
+        "each step shows mark ⚠ when irreversible, ⊘ when remote, ✗ on failure. "
+        "Show suggested.confirm to the user before action='restore'. "
+        "action='preview' is a dry-run of restore (no writes). "
         "action='restore' overwrites files and (by default) moves git HEAD back to before `step` "
-        "(config restore_mode=worktree_only keeps the branch tip; confirm with the user; "
-        "does NOT undo chat — pair with /undo; does NOT undo pushes/publishes — see irreversible_summary). "
-        "action='fork' leaves current work untouched and creates a sibling worktree/dir. "
-        "action='unfork' removes a previous fork. Prefer restore only when the user wants to discard later work."),
+        "(omit `step` for last tool mutation; does NOT undo chat — /undo; does NOT undo pushes — stays_outside). "
+        "action='fork' copies past state elsewhere (omit step = last). action='unfork' removes a fork."
+    ),
     "parameters": {
         "type": "object",
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["list", "restore", "fork", "unfork"],
+                "enum": ["list", "preview", "restore", "fork", "unfork"],
                 "description": (
-                    "list = numbered timeline with irreversible markers; "
-                    "restore = overwrite workspace to before `step` (destructive — confirm with user); "
-                    "fork = copy past state elsewhere (safe); "
+                    "list = timeline + suggested.confirm; "
+                    "preview = dry-run restore impact; "
+                    "restore = overwrite workspace to before step; "
+                    "fork = copy past state elsewhere; "
                     "unfork = delete a fork worktree/dir"
                 ),
             },
             "step": {
                 "type": "integer",
-                "description": "Timeline step number (required for restore/fork; optional for unfork)",
+                "description": (
+                    "Timeline step from action=list. "
+                    "Omit for preview/restore/fork to target the last tool step."
+                ),
             },
             "model": {
                 "type": "string",
@@ -68,25 +73,32 @@ def register(ctx):
             action = args.get("action")
             if action == "list":
                 steps = core.timeline_steps(sid)
+                suggested = None
+                last = core.resolve_last_tool_step(sid)
+                if last is not None:
+                    suggested = core.restore_preview(sid, last)
                 return json.dumps({
                     "count": len(steps),
                     "steps": steps,
                     "timeline": core.timeline(sid),
-                    "hint": "⚠ = irreversible side effects; ⊘ = remote backend (cannot restore); "
-                            "restore overwrites files — confirm with the user first. "
-                            "Chat is separate: use built-in /undo for conversation.",
+                    "suggested": suggested,
+                    "hint": "Show suggested.confirm to the user, or call action=preview, before restore. "
+                            "⚠ = irreversible; ⊘ = remote (cannot restore). Chat: built-in /undo.",
                 })
             if action == "unfork":
                 target = args.get("path") or args.get("step")
                 return json.dumps(core.unfork(sid, target))
             step = args.get("step")
-            if not isinstance(step, int):
-                return json.dumps({"error": "step (integer from action=list) is required for restore/fork"})
-            if action == "fork":
-                return json.dumps(core.fork(sid, step, settings, model=args.get("model")))
-            if action == "restore":
-                return json.dumps(core.rewind(sid, step, settings))
-            return json.dumps({"error": f"unknown action {action!r}; use list|restore|fork|unfork"})
+            if action in ("fork", "restore", "preview"):
+                seq, err = core.resolve_step_arg(sid, step if step is not None else "last")
+                if err:
+                    return json.dumps({"ok": False, "error": err})
+                if action == "preview":
+                    return json.dumps(core.restore_preview(sid, seq))
+                if action == "fork":
+                    return json.dumps(core.fork(sid, seq, settings, model=args.get("model")))
+                return json.dumps(core.rewind(sid, seq, settings))
+            return json.dumps({"error": f"unknown action {action!r}; use list|preview|restore|fork|unfork"})
         except Exception as exc:
             return json.dumps({"error": f"rewind failed: {exc}"})
 
@@ -97,7 +109,7 @@ def register(ctx):
     ctx.register_command(
         "rewind", r,
         description="Restore files+git before step N; fork / unfork / gc",
-        args_hint="<step> | fork <step> [--model NAME] | unfork [path|step] | gc",
+        args_hint="last | <step> | preview [last|<step>] | fork <step|last> | unfork | gc",
     )
     ctx.register_command("rewind-diff", d, description="Show what a step changed", args_hint="<step> [to]")
     if hasattr(ctx, "register_cli_command"):

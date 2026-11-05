@@ -35,7 +35,7 @@ def test_git_multi_step_rewind(ctx, tmp_path):
     tl = ctx.cmds["timeline"]("", session_id="s1")
     assert "write_file" in tl and "terminal" in tl
     out = ctx.cmds["rewind"]("1", session_id="s1")
-    assert "Rewound" in out, out
+    assert "Restored" in out, out
     assert (d / "app.py").read_text() == "print('v1')\n"
     assert not (d / "new.py").exists()
     assert (d / "legacy" / "old.py").read_text() == "x=1\n"

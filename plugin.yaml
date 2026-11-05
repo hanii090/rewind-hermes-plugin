@@ -1,5 +1,5 @@
 name: rewind
-version: "0.3.1"
+version: "0.3.4"
 manifest_version: 2
 api_version: 1
 description: "Per-step undo timeline for agent file/git changes (not memory). Every write_file/patch/terminal is a numbered step; /rewind restores files+HEAD, /rewind fork tries an alternative in a worktree, irreversible side-effects are flagged. Complements built-in /rollback + /undo — does not replace them."

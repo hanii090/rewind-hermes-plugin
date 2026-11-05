@@ -11,6 +11,8 @@ Even the rewind is undoable. Fork any step into a sibling worktree to try the ot
   •   3  terminal     rm -r legacy && git commit…    (repo)
   ⚠   4  terminal     git push origin main           (repo)  ⚠ git push reaches a remote
 /rewind-diff 3
+/rewind last           # one-shot: undo the latest tool step (or /rewind 3)
+/rewind preview last   # dry-run confirm copy (irreversible span, no writes)
 /rewind 3              # files + HEAD before step 3; push is flagged, not undone
 /rewind fork 2 --model gpt-x   # try the alternative next door; current checkout untouched
 /rewind unfork         # clean up fork worktrees when you're done
@@ -44,6 +46,8 @@ or a Desktop scrubber.** They coexist.
 
 ## Commands, tool, and UI
 - `/timeline` — • ok · ✗ failed · ⚠ irreversible · ⊘ remote · ◆ safety · 🌿 fork; shows `turn:` when known
+- `/rewind last` — undo the most recent tool step (no timeline number required)
+- `/rewind preview [last|<n>]` — dry-run restore impact + confirm copy (no writes)
 - `/rewind <n>` — restore every touched root to the state before step *n* (files + git HEAD by default)
 - `/rewind fork <n> [--model NAME]` — sibling worktree/dir at that past state; optional model label for a future Arena re-run (prints how-to today)
 - `/rewind unfork [path|step]` — remove fork worktrees/branches Rewind created
@@ -102,7 +106,7 @@ python3 scripts/demo.py            # temp playground, auto-cleaned; prints SCORE
 python3 scripts/demo.py --keep /tmp/rewind-demo
 ```
 Walks write → rm+commit → timeline → fork --model → hand-edit warning on rewind → unfork.
-For a live Hermes dispatcher probe (still no LLM): `scripts/live_probe.py` → `tests/manual_hermes_live_probe.py` (kept under `tests/` so catalog validate ignores its private Hermes imports; prefer `scripts/demo.py`).
+For a live Hermes dispatcher probe (still no LLM): `scripts/live_probe.sh` → `tests/manual_hermes_live_probe.py` (kept under `tests/` so catalog validate ignores its private Hermes imports; prefer `scripts/demo.py`).
 
 ### ~75 s video beats
 1. Hook: agent deleted the wrong folder and committed it.

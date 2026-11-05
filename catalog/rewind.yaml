@@ -1,9 +1,9 @@
-# LOCAL DRAFT for hermes-agent plugin-catalog — GitHub: hanii090/rewind-hermes-plugin (repo create + push pending).
-# Pin sha to the exact tip you submit in the catalog PR after the public repo exists.
+# LOCAL DRAFT for hermes-agent plugin-catalog — public repo: hanii090/rewind-hermes-plugin (seeded; box tip may be ahead).
+# Pin sha to the exact commit you submit in the catalog PR once GitHub is synced.
 name: rewind
 title: Rewind
 repo: https://github.com/hanii090/rewind-hermes-plugin
-sha: 26792c8efdc589684b8aeff177915e2db8f33340
+sha: 8e620df11ed6545e3eea6de980aaec204286862b
 description: >-
   Per-step undo timeline for agent workspace changes (files + git HEAD) — not memory.
   Every write_file, patch, and terminal/execute_code call becomes a numbered step; /timeline
@@ -28,7 +28,7 @@ tier: community
 category: tools
 requires_hermes: ">=0.21.6"
 docs_url: https://github.com/hanii090/rewind-hermes-plugin#readme
-version: "0.3.1"
+version: "0.3.4"
 readme: true
 platforms: [linux, macos]
 known_issues:

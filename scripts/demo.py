@@ -60,6 +60,10 @@ def main() -> int:
         "empty_session_ok": False,
         "irreversible_summary": False,
         "moved_head": False,
+        "irr_footer": False,
+        "fork_compare": False,
+        "rewind_last": False,
+        "preview_ok": False,
     }
 
     import importlib.util
@@ -126,42 +130,60 @@ def main() -> int:
         wipe, turn="turn-rm")
     assert not (playground / "legacy").exists()
 
-    say("2b. Flag an irreversible push (journal only)")
-    run("terminal", {"command": "git push origin main", "workdir": str(playground)}, lambda: None, turn="turn-push")
+    say("3. /rewind-diff 2 — what the delete changed")
+    diff = ctx.cmds["rewind-diff"]("2", session_id=SID)
+    print(diff)
+    assert "legacy" in diff.lower() or "old.py" in diff
 
-    say("3. /timeline (⚠/turn markers)")
+    say("4. /rewind fork last --model demo-gpt  (alt past + vs_current; last=delete)")
+    fork_out = ctx.cmds["rewind"]("fork last --model demo-gpt", session_id=SID)
+    print(fork_out)
+    assert "Forked" in fork_out and "compare:" in fork_out
+    forks = list(playground.parent.glob(f"{playground.name}-fork-*-*"))
+    assert forks, "expected a sibling fork worktree"
+    fork = forks[0]
+    board["fork_path"] = str(fork)
+    board["fork_compare"] = "compare:" in fork_out
+    assert (fork / "app.py").read_text() == "print('v2-broken')\n"
+    assert (fork / "legacy" / "old.py").exists()
+    assert not (playground / "legacy").exists()
+
+    say("5. Flag an irreversible push (footer on tool result)")
+    def push_call(a):
+        return json.dumps({"ok": True, "stdout": "pushed (simulated)"})
+    push_raw = ctx.mw["tool_execution"](
+        tool_name="terminal",
+        args={"command": "git push origin main", "workdir": str(playground)},
+        next_call=push_call, session_id=SID, turn_id="turn-push",
+    )
+    print(push_raw)
+    assert "⚠ Rewind" in push_raw and "/rewind last" in push_raw
+    board["irr_footer"] = True
+
+    say("6. /timeline (⚠/turn markers)")
     tl = ctx.cmds["timeline"]("", session_id=SID)
     print(tl)
     assert "write_file" in tl and "terminal" in tl
     assert "turn:" in tl
     assert "⚠" in tl
     board["steps_captured"] = sum(1 for l in tl.splitlines() if l[:1] in "•⚠✗⊘◆🌿")
-    board["irreversible_flagged"] = tl.count("⚠")
+    early = json.loads(ctx.tools["rewind_restore"]({"action": "list"}, session_id=SID))
+    board["irreversible_flagged"] = sum(1 for s in early["steps"] if s.get("irreversible"))
 
-    say("4. /rewind-diff 2 — what the delete changed")
-    diff = ctx.cmds["rewind-diff"]("2", session_id=SID)
-    print(diff)
-    assert "legacy" in diff.lower() or "old.py" in diff
-
-    say("5. Hand-edit drift warning path (touch app.py outside the agent)")
+    say("6b. Hand-edit drift warning path (touch app.py outside the agent)")
     (playground / "app.py").write_text("print('v2-broken')\n# I fixed it by hand\n")
 
-    say("6. /rewind fork 2 --model demo-gpt  (try the alternative elsewhere)")
-    fork_out = ctx.cmds["rewind"]("fork 2 --model demo-gpt", session_id=SID)
-    print(fork_out)
-    assert "Forked" in fork_out
-    forks = list(playground.parent.glob(f"{playground.name}-fork-2-*"))
-    assert forks, "expected a sibling fork worktree"
-    fork = forks[0]
-    board["fork_path"] = str(fork)
-    assert (fork / "app.py").read_text() == "print('v2-broken')\n"
-    assert (fork / "legacy" / "old.py").exists()
-    assert not (playground / "legacy").exists()
+    say("6c. /rewind preview 2 — confirm copy before destructive restore")
+    prev = ctx.cmds["rewind"]("preview 2", session_id=SID)
+    print(prev)
+    assert "Preview" in prev and "no changes made" in prev
+    assert "irreversible" in prev.lower() and "Run: /rewind 2" in prev
+    board["preview_ok"] = True
 
     say("7. /rewind 2 — restore files + HEAD; note hand-edit + /undo hint")
     out = ctx.cmds["rewind"]("2", session_id=SID)
     print(out)
-    assert "Rewound" in out
+    assert "Restored" in out
     assert (playground / "legacy" / "old.py").read_text() == "x=1\n"
     board["legacy_restored"] = True
     assert (playground / "app.py").read_text() == "print('v2-broken')\n"
@@ -174,6 +196,16 @@ def main() -> int:
     board["irreversible_summary"] = True
     assert "HEAD moved" in out
     board["moved_head"] = True
+
+    say("7a. break again, then /rewind last (one-shot undo)")
+    run("write_file", {"path": str(playground / "app.py")},
+        lambda: (playground / "app.py").write_text("print('v3-oops')\n"), turn="turn-oops")
+    assert "v3-oops" in (playground / "app.py").read_text()
+    last_out = ctx.cmds["rewind"]("last", session_id=SID)
+    print(last_out)
+    assert "Restored" in last_out
+    assert (playground / "app.py").read_text() == "print('v2-broken')\n"
+    board["rewind_last"] = True
 
     say("7b. unfork still works after a rewind (fork row survives in journal)")
     u = ctx.cmds["rewind"]("unfork", session_id=SID)
@@ -207,6 +239,10 @@ def main() -> int:
         ("empty session copy OK", board["empty_session_ok"]),
         ("irreversible summary (push)", board["irreversible_summary"]),
         ("HEAD moved on restore", board["moved_head"]),
+        ("irr. footer on push result", board["irr_footer"]),
+        ("fork vs_current line", board["fork_compare"]),
+        ("/rewind last one-shot", board["rewind_last"]),
+        ("preview confirm copy", board["preview_ok"]),
     ]
     print("\n╔══════════════════════════════════════════╗")
     print("║         REWIND DEMO SCOREBOARD           ║")
@@ -228,7 +264,7 @@ def main() -> int:
         print("\nDEMO FAILED: scoreboard incomplete", file=sys.stderr)
         return 1
 
-    say("PASS", "Demo story completed. Competition-ready beats: timeline → fork → rewind → unfork.")
+    say("PASS", "Demo story completed. Competition-ready beats: footer → fork last → rewind last → unfork.")
     if not keep:
         shutil.rmtree(playground, ignore_errors=True)
         print(f"(cleaned {playground})")

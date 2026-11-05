@@ -74,7 +74,9 @@ function RewindPane() {
     CTX.rest(path, { method: 'POST', body: { step: cur, session: data.session || session } }).then(r => {
       const notes = []
       if (r && r.hand_edits_overwritten && r.hand_edits_overwritten.length) notes.push('overwrote hand-edits')
-      if (r && r.not_reversible && r.not_reversible.length) notes.push('some side-effects not undone')
+      if (r && r.stays_outside && r.stays_outside.length) notes.push(`${r.stays_outside.length} side-effect(s) remain outside`)
+      else if (r && r.not_reversible && r.not_reversible.length) notes.push('some side-effects not undone')
+      if (r && r.restore_mode === 'worktree_only') notes.push('HEAD left in place')
       host.notify({
         kind: r && r.ok ? 'success' : 'error',
         message: r && r.ok
@@ -143,7 +145,16 @@ function RewindPane() {
         max: steps[steps.length - 1].seq,
         value: cur ?? 0,
         disabled: busy,
-        onChange: e => setSel(Number(e.target.value)),
+        onChange: e => {
+          const raw = Number(e.target.value)
+          // Snap to nearest real step (seq gaps from deletes/safety keep the slider honest).
+          let best = steps[0].seq, bestD = Math.abs(steps[0].seq - raw)
+          for (const s of steps) {
+            const d = Math.abs(s.seq - raw)
+            if (d < bestD) { best = s.seq; bestD = d }
+          }
+          setSel(best)
+        },
         'aria-label': 'Scrub timeline',
         className: 'w-full'
       }),

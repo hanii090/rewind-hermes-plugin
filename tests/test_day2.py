@@ -187,7 +187,7 @@ def test_hand_edit_warning_and_undo_hint(ctx, tmp_path):
     run_tool(ctx, "write_file", {"path": str(d / "app.py")}, lambda: (d / "app.py").write_text("A\n"))
     (d / "app.py").write_text("A\n# hand\n")
     out = ctx.cmds["rewind"]("1", session_id="s1")
-    assert "Rewound" in out
+    assert "Restored" in out
     assert "hand" in out.lower() or "Overwrote" in out
     assert "/undo" in out
     assert (d / "app.py").read_text() == "print('v1')\n"

@@ -35,7 +35,7 @@ def test_unfork_after_rewind(ctx, tmp_path):
     assert "Forked" in ctx.cmds["rewind"]("fork 2", session_id="s1")
     forks = list(tmp_path.glob("repo-fork-2-*"))
     assert forks and forks[0].exists()
-    assert "Rewound" in ctx.cmds["rewind"]("2", session_id="s1")
+    assert "Restored" in ctx.cmds["rewind"]("2", session_id="s1")
     # fork worktree still on disk; journal still has 🌿 row
     assert forks[0].exists()
     u = ctx.cmds["rewind"]("unfork", session_id="s1")
@@ -140,3 +140,91 @@ def test_move_head_default_still_resets_branch(ctx, tmp_path):
     assert out["ok"] and out.get("restore_mode") == "move_head"
     assert any(r.get("moved_head") for r in out["roots"])
     assert git(d, "rev-parse", "HEAD") == head0
+
+
+def test_exec_in_home_still_journaled(ctx, tmp_path, monkeypatch):
+    """cwd=home is too broad to snapshot, but /timeline must not stay silent."""
+    home = tmp_path / "fake-home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    # Force default_cwd / workdir to the fake home
+    run_tool(ctx, "terminal", {"command": "echo hi", "workdir": str(home)}, lambda: None)
+    listed = json.loads(ctx.tools["rewind_restore"]({"action": "list"}, session_id="s1"))
+    assert listed["count"] == 1
+    step = listed["steps"][0]
+    assert step["mode"] == "none"
+    assert "not snapshotted" in (step.get("irreversible") or "")
+    tl = ctx.cmds["timeline"]("", session_id="s1")
+    assert "⊘" in tl
+
+
+def test_unfork_idempotent_when_path_already_gone(ctx, tmp_path):
+    d = make_repo(tmp_path)
+    run_tool(ctx, "write_file", {"path": str(d / "app.py")}, lambda: (d / "app.py").write_text("x\n"))
+    assert "Forked" in ctx.cmds["rewind"]("fork 1", session_id="s1")
+    forks = list(tmp_path.glob("repo-fork-1-*"))
+    assert forks
+    import shutil
+    shutil.rmtree(forks[0])
+    u = ctx.cmds["rewind"]("unfork", session_id="s1")
+    assert "Removed" in u
+    # second unfork: journal still has fork row; path gone → still ok
+    u2 = ctx.cmds["rewind"]("unfork", session_id="s1")
+    assert "Removed" in u2
+
+
+
+def test_rewind_last_undoes_latest_tool_step(ctx, tmp_path):
+    d = make_repo(tmp_path)
+    run_tool(ctx, "write_file", {"path": str(d / "app.py")}, lambda: (d / "app.py").write_text("A\n"))
+    run_tool(ctx, "write_file", {"path": str(d / "app.py")}, lambda: (d / "app.py").write_text("B\n"))
+    out = ctx.cmds["rewind"]("last", session_id="s1")
+    assert "Restored" in out and "step 2" in out, out
+    assert (d / "app.py").read_text() == "A\n"
+    # tool: omit step → last
+    run_tool(ctx, "write_file", {"path": str(d / "app.py")}, lambda: (d / "app.py").write_text("C\n"), sid="s1")
+    r = json.loads(ctx.tools["rewind_restore"]({"action": "restore"}, session_id="s1"))
+    assert r["ok"] is True
+    assert (d / "app.py").read_text() == "A\n"  # undid C; prior rewind's world was A
+
+
+def test_irreversible_appended_to_tool_result(ctx, tmp_path):
+    d = make_repo(tmp_path)
+    def next_call(a):
+        return json.dumps({"ok": True, "stdout": "pushed"})
+    raw = ctx.mw["tool_execution"](
+        tool_name="terminal",
+        args={"command": "git push origin main", "workdir": str(d)},
+        next_call=next_call,
+        session_id="s1",
+    )
+    assert "⚠ Rewind" in raw and "irreversible" in raw.lower()
+    assert "/rewind last" in raw
+
+
+def test_fork_last_includes_vs_current(ctx, tmp_path):
+    d = make_repo(tmp_path)
+    run_tool(ctx, "write_file", {"path": str(d / "app.py")}, lambda: (d / "app.py").write_text("X\n"))
+    msg = ctx.cmds["rewind"]("fork last", session_id="s1")
+    assert "Forked" in msg and "compare:" in msg, msg
+
+
+def test_preview_and_timeline_last_marker(ctx, tmp_path):
+    d = make_repo(tmp_path)
+    run_tool(ctx, "write_file", {"path": str(d / "app.py")}, lambda: (d / "app.py").write_text("A\n"))
+    run_tool(ctx, "terminal", {"command": "git push origin main", "workdir": str(d)}, lambda: None)
+    tl = ctx.cmds["timeline"]("", session_id="s1")
+    assert "Last mutation:" in tl and "← last" in tl
+    assert "Confirm copy:" in tl
+    prev = ctx.cmds["rewind"]("preview last", session_id="s1")
+    assert "Preview" in prev and "no changes made" in prev
+    assert "irreversible" in prev.lower()
+    # workspace untouched by preview
+    assert (d / "app.py").read_text() == "A\n"
+    listed = json.loads(ctx.tools["rewind_restore"]({"action": "list"}, session_id="s1"))
+    assert listed["suggested"] and listed["suggested"]["ok"]
+    assert "confirm" in listed["suggested"]
+    assert any(s.get("is_last_tool") for s in listed["steps"])
+    # restore message leads with irreversible when crossing push
+    out = ctx.cmds["rewind"]("1", session_id="s1")
+    assert "Restored" in out and "Crossed" in out and "irreversible" in out.lower()
