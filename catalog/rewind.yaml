@@ -1,0 +1,45 @@
+# LOCAL DRAFT for hermes-agent plugin-catalog — GitHub: hanii090/rewind-hermes-plugin (repo create + push pending).
+# Pin sha to the exact tip you submit in the catalog PR after the public repo exists.
+name: rewind
+title: Rewind
+repo: https://github.com/hanii090/rewind-hermes-plugin
+sha: a832d042f6c3b86f5df74634a34a885448ed047b
+description: >-
+  Per-step undo timeline for agent workspace changes (files + git HEAD) — not memory.
+  Every write_file, patch, and terminal/execute_code call becomes a numbered step; /timeline
+  lists them, /rewind N restores files and can move HEAD back to just before that step,
+  /rewind fork N materialises the past in a sibling worktree, and irreversible side-effects
+  (push, publish, network writes, DB/infra CLIs, privileged shells, recursive root/home deletes)
+  are flagged. Complements built-in /rollback (turn-level + chat) and /undo (conversation);
+  distinct from catalog memory-rewind (MEMORY.md/USER.md) and git-autosave (observe-only shadow refs).
+  Disclosure — registers tool rewind_restore, tool_execution middleware, slash commands
+  /timeline /rewind /rewind-diff, CLI hermes rewind, a dashboard router, and an opt-in Desktop
+  pane; writes a SQLite journal and content-addressed blobs under the Hermes plugin data dir
+  plus refs/hermes-rewind/<instance-id>/* inside git repos the agent touches; /rewind fork adds
+  a rewind/fork-* branch and git worktree (remove with /rewind unfork); restoring overwrites
+  files and may reset HEAD (config restore_mode: move_head default, or worktree_only) only on
+  explicit user/agent restore after a safety snapshot; irreversible side-effects (push/publish/
+  remote) surface as irreversible_summary; hand-edits since the last step are detected and warned;
+  no network; no secrets; stdlib + git binary only; no Hermes core patches; remote TERMINAL_ENV
+  backends are journaled as not snapshotted; conversation is not rewound (pair with /undo);
+  no self-updater.
+maintainer: hanii090
+tier: community
+category: tools
+requires_hermes: ">=0.21.6"
+docs_url: https://github.com/hanii090/rewind-hermes-plugin#readme
+version: "0.3.1"
+readme: true
+platforms: [linux, macos]
+known_issues:
+  - "Conversation history is not undone on restore — pair with built-in /undo (steps store turn_id when Hermes provides it)."
+  - "Non-local TERMINAL_ENV (docker/ssh/modal/…) steps are recorded as not snapshotted and cannot be restored."
+  - "/rewind moves git HEAD by default (restore_mode=move_head); set worktree_only to keep the tip; prefer git-autosave for observe-only shadow refs."
+  - "Rewinding across git push / publish restores local files only — irreversible_summary lists what stays outside."
+capabilities:
+  provides_tools:
+    - rewind_restore
+  provides_hooks: []
+  provides_middleware:
+    - tool_execution
+  requires_env: []
